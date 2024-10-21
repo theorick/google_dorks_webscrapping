@@ -1,0 +1,83 @@
+import asyncio
+import re
+import requests
+from bs4 import BeautifulSoup
+from playwright.async_api import async_playwright
+
+nom_fichier = 'db.csv'
+
+async def scrape_google_results(company_name):
+    query = f"intext:{company_name.replace(' ', '+')}+site:linkedin.com+intext:email"
+    url = f"https://www.google.com/search?q={query}"
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+        page = await browser.new_page()
+
+        # Naviguer vers l'URL de recherche Google
+        await page.goto(url)
+
+        # Attendre que les résultats se chargent
+        await page.wait_for_selector('div.g')
+
+        # Récupérer les liens des résultats
+        results = await page.query_selector_all('div.g a')
+
+        # Collecter les liens résultants
+        links = []
+        for result in results:
+            link = await result.get_attribute('href')
+            if link:
+                links.append(link)
+
+        await browser.close()
+
+        return links
+
+
+# Extract emails from a given URL
+def extract_emails_from_url(url):
+    try:
+        response = requests.get(url)
+        soup = BeautifulSoup(response.content, 'html.parser')
+        set_emails = set()
+
+        for element in soup.find_all(class_=True):
+            # Extraire le texte de chaque élément
+            text = element.get_text()
+            # Trouver et ajouter les emails uniques dans set_emails
+            emails = re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', text)
+            for email in emails:
+                set_emails.add(email)
+
+        return list(set_emails)
+    except Exception as e:
+        print(f"Erreur lors de la récupération des emails depuis {url}: {e}")
+        return []
+
+
+# Nom de l'entreprise
+company_names = ["LVMH", "BTP", "jarvis", "air liquide"]
+
+
+# Exécuter le script
+async def main():
+    with open(nom_fichier, 'a', buffering=1) as fichier:
+        for company_name in company_names:
+            links = await scrape_google_results(company_name)
+            all_emails = set()
+
+            for link in links:
+                emails = extract_emails_from_url(link)
+                if emails:
+                    for email in emails:
+                        all_emails.add(email)
+
+            print(f"Nom : {company_name}")
+            print("Emails uniques trouvés : ", list(all_emails))
+            for email in all_emails:
+                fichier.write(f"{email}\n")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
